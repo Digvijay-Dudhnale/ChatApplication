@@ -5,6 +5,7 @@ import { AppContext } from '../../Context/AppContext'
 import { arrayUnion, doc, getDoc, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore'
 import { db } from '../../Config/firebase'
 import { toast } from 'react-toastify'
+import upload from '../../Lib/upload'
 
 const ChatBox = () => {
 
@@ -49,14 +50,52 @@ const ChatBox = () => {
         setInput("");
     }
 
-    const convertTimeStamp = (timestamp) =>{
+    const sendImage = async (e) => {
+        try {
+            const fileUrl = await upload(e.target.files[0]);
+            if (fileUrl && messagesId) {
+                await updateDoc(doc(db, "messages", messagesId), {
+                    messages: arrayUnion({
+                        sId: userData.id,
+                        image: fileUrl,
+                        createdAt: new Date()
+                    })
+                })
+
+                const userIDs = [chatUser.rId, userData.id];
+
+                userIDs.forEach(async (id) => {
+                    const userChatsRef = doc(db, "chats", id);
+                    const userChatsSnapshot = await getDoc(userChatsRef);
+
+                    if (userChatsSnapshot.exists()) {
+                        const userChatData = userChatsSnapshot.data();
+                        const chatIndex = userChatData.chatData.findIndex((c) => c.messageId === messagesId);
+                        userChatData.chatData[chatIndex].lastMessage = "Image";
+                        userChatData.chatData[chatIndex].updatedAt = Date.now();
+
+                        if (userChatData.chatData[chatIndex].rId === userData.id) {
+                            userChatData.chatData[chatIndex].messageSeen = false;
+                        }
+                        await updateDoc(userChatsRef, {
+                            chatData: userChatData.chatData
+                        })
+                    }
+                })
+            }
+        } catch (error) {
+            toast.error(error.message);
+        }
+    }
+
+    const convertTimeStamp = (timestamp) => {
         let date = timestamp.toDate();
         const hour = date.getHours();
         const minute = date.getMinutes();
-        if(hour > 12){
-            return hour-12 + ":" + minute + " PM";
+        if (hour > 12) {
+            return hour - 12 + ":" + minute + " PM";
         }
-        else{
+        else {
             return hour + ":" + minute + " AM";
         }
     }
@@ -76,7 +115,7 @@ const ChatBox = () => {
         <div className='chat-box'>
             <div className="chat-user">
                 <img src={chatUser.userData.avatar} alt="" />
-                <p>{chatUser.userData.name} <img className='dot' src={assets.green_dot} alt="" /></p>
+                <p>{chatUser.userData.name} {Date.now()-chatUser.userData.lastSeen <= 70000 ? <img className='dot' src={assets.green_dot} alt="" /> : null}</p>
                 <img src={assets.help_icon} className='help' alt="" />
             </div>
 
@@ -84,7 +123,10 @@ const ChatBox = () => {
 
                 {messages.map((msg, index) => (
                     <div key={index} className={msg.sId === userData.id ? "s-msg" : "r-msg"}>
-                        <p className="msg">{msg.text}</p>
+                        {msg["image"]
+                            ? <img className="msg-img" src={msg.image} alt="" />
+                            : <p className="msg">{msg.text}</p>
+                        }
                         <div>
                             <img src={msg.sId === userData.id ? userData.avatar : chatUser.userData.avatar} alt="" />
                             <p>{convertTimeStamp(msg.createdAt)}</p>
@@ -95,7 +137,7 @@ const ChatBox = () => {
 
             <div className="chat-input">
                 <input onChange={(e) => setInput(e.target.value)} value={input} type="text" placeholder='Send a message' />
-                <input type="file" id='image' accept='image/png, image/jpeg' hidden />
+                <input onChange={sendImage} type="file" id='image' accept='image/png, image/jpeg' hidden />
                 <label htmlFor="image">
                     <img src={assets.gallery_icon} alt="" />
                 </label>
